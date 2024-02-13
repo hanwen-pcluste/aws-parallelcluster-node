@@ -536,12 +536,15 @@ class ClusterManager:
                 # Get all non-terminating instances in EC2
                 try:
                     cluster_instances = self._get_ec2_instances()
+                    instance_ids = {node.comment for node in nodes if node.comment}
+                    cluster_instances_from_id = self._instance_manager.get_cluster_instances(instance_ids=list(instance_ids))
                 except ClusterManager.EC2InstancesInfoUnavailable:
                     log.error("Unable to get instances info from EC2, no other action can be performed. Sleeping...")
                     return
                 log.debug("Current cluster instances in EC2: %s", cluster_instances)
+                log.debug("Current cluster instances in EC2 by instance id: %s", cluster_instances_from_id)
                 partitions = list(partitions_name_map.values())
-                self._update_slurm_nodes_with_ec2_info(nodes, cluster_instances)
+                self._update_slurm_nodes_with_ec2_info(nodes, cluster_instances_from_id)
                 self._event_publisher.publish_compute_node_events(nodes, cluster_instances)
                 # Handle inactive partition and terminate backing instances
                 self._clean_up_inactive_partition(partitions)
@@ -551,7 +554,7 @@ class ClusterManager:
                 # Maintain slurm nodes
                 self._maintain_nodes(partitions_name_map, compute_resource_nodes_map)
                 # Clean up orphaned instances
-                self._terminate_orphaned_instances(cluster_instances)
+                self._terminate_orphaned_instances(cluster_instances, instance_ids)
             elif self._compute_fleet_status in {
                 ComputeFleetStatus.STOPPED,
             }:
@@ -941,12 +944,12 @@ class ClusterManager:
         self._handle_failed_health_check_nodes_in_replacement(active_nodes)
 
     @log_exception(log, "terminating orphaned instances", catch_exception=Exception, raise_on_error=False)
-    def _terminate_orphaned_instances(self, cluster_instances):
+    def _terminate_orphaned_instances(self, cluster_instances, instance_ids):
         """Terminate instance not associated with any node and running longer than orphaned_instance_timeout."""
         log.info("Checking for orphaned instance")
         instances_to_terminate = []
         for instance in cluster_instances:
-            if not instance.slurm_node and time_is_up(
+            if not instance.id not in instance_ids and time_is_up(
                 instance.launch_time, self._current_time, self._config.orphaned_instance_timeout
             ):
                 instances_to_terminate.append(instance.id)
@@ -1125,14 +1128,14 @@ class ClusterManager:
             raise
 
     @staticmethod
-    def _update_slurm_nodes_with_ec2_info(nodes, cluster_instances):
-        if cluster_instances:
-            ip_to_slurm_node_map = {node.nodeaddr: node for node in nodes}
-            for instance in cluster_instances:
-                if instance.private_ip in ip_to_slurm_node_map:
-                    slurm_node = ip_to_slurm_node_map.get(instance.private_ip)
+    def _update_slurm_nodes_with_ec2_info(nodes, instances):
+        instance_id_to_slurm_node_map = {node.comment: node for node in nodes}
+
+        if instances:
+            for instance in instances:
+                if instance.id in instance_id_to_slurm_node_map:
+                    slurm_node = instance_id_to_slurm_node_map.get(instance.id)
                     slurm_node.instance = instance
-                    instance.slurm_node = slurm_node
 
     @staticmethod
     def get_instance_id_to_active_node_map(partitions: List[SlurmPartition]) -> Dict:

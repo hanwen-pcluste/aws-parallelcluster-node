@@ -129,6 +129,7 @@ def update_nodes(
     nodes,
     nodeaddrs=None,
     nodehostnames=None,
+    nodecomments=None,
     state=None,
     reason=None,
     raise_on_error=True,
@@ -151,7 +152,7 @@ def update_nodes(
     if we run scontrol update state=fail_state nodeaddr=good_addr nodename=name,
     the scontrol command will fail but nodeaddr will be updated to good_addr.
     """
-    batched_node_info = _batch_node_info(nodes, nodeaddrs, nodehostnames, batch_size=100)
+    batched_node_info = _batch_node_info(nodes, nodeaddrs, nodehostnames, nodecomments, batch_size=100)
 
     update_cmd = f"{SCONTROL} update"
     if state:
@@ -160,7 +161,7 @@ def update_nodes(
     if reason:
         validate_subprocess_argument(reason)
         update_cmd += f' reason="{reason}"'
-    for nodenames, addrs, hostnames in batched_node_info:
+    for nodenames, addrs, hostnames, comments in batched_node_info:
         validate_subprocess_argument(nodenames)
         node_info = f"nodename={nodenames}"
         if addrs:
@@ -169,6 +170,9 @@ def update_nodes(
         if hostnames:
             validate_subprocess_argument(hostnames)
             node_info += f" nodehostname={hostnames}"
+        if comments:
+            validate_subprocess_argument(comments)
+            update_cmd += f' comment="{comments}"'
         # It's safe to use the function affected by B604 since the command is fully built in this code
         run_command(  # nosec B604
             f"{update_cmd} {node_info}", raise_on_error=raise_on_error, timeout=command_timeout, shell=True
@@ -223,7 +227,7 @@ def _batch_attribute(attribute, batch_size, expected_length=None):
     return [",".join(batch) for batch in grouper(attribute, batch_size)]
 
 
-def _batch_node_info(nodenames, nodeaddrs, nodehostnames, batch_size):
+def _batch_node_info(nodenames, nodeaddrs, nodehostnames, comments, batch_size):
     """Group nodename, nodeaddrs, nodehostnames into batches."""
     if type(nodenames) is str:
         # Only split on , if there is ] before
@@ -232,6 +236,7 @@ def _batch_node_info(nodenames, nodeaddrs, nodehostnames, batch_size):
     nodename_batch = _batch_attribute(nodenames, batch_size)
     nodeaddrs_batch = [None] * len(nodename_batch)
     nodehostnames_batch = [None] * len(nodename_batch)
+    comments_batch = [None] * len(nodename_batch)
     if nodeaddrs:
         try:
             nodeaddrs_batch = _batch_attribute(nodeaddrs, batch_size, expected_length=len(nodenames))
@@ -244,8 +249,14 @@ def _batch_node_info(nodenames, nodeaddrs, nodehostnames, batch_size):
         except ValueError:
             log.error("Nodename %s and NodeHostname %s contain different number of entries", nodenames, nodehostnames)
             raise
+    if comments:
+        try:
+            comments_batch = _batch_attribute(comments, batch_size, expected_length=len(nodenames))
+        except ValueError:
+            log.error("Nodename %s and NodeHostname %s contain different number of entries", nodenames, nodehostnames)
+            raise
 
-    return zip(nodename_batch, nodeaddrs_batch, nodehostnames_batch)
+    return zip(nodename_batch, nodeaddrs_batch, nodehostnames_batch, comments_batch)
 
 
 def set_nodes_down(nodes, reason):
@@ -267,7 +278,7 @@ def set_nodes_power_down(nodes, reason=None):
 def reset_nodes(nodes, state=None, reason=None, raise_on_error=False):
     """Reset nodeaddr and nodehostname to be equal to nodename."""
     update_nodes(
-        nodes=nodes, nodeaddrs=nodes, nodehostnames=nodes, state=state, reason=reason, raise_on_error=raise_on_error
+        nodes=nodes, nodeaddrs=nodes, nodehostnames=nodes, state=state, reason=reason, nodecomments="", raise_on_error=raise_on_error
     )
 
 
@@ -433,6 +444,7 @@ def _parse_nodes_info(slurm_node_info: str) -> List[SlurmNode]:
         "SlurmdStartTime": "slurmdstarttime",
         "LastBusyTime": "lastbusytime",
         "ReservationName": "reservation_name",
+        "Comment": "comment"
     }
 
     date_fields = ["SlurmdStartTime", "LastBusyTime"]

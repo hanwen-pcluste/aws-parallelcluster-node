@@ -258,7 +258,7 @@ class InstanceManager:
         return list(instance_health_states.values())
 
     @log_exception(logger, "getting cluster instances from EC2", raise_on_error=True)
-    def get_cluster_instances(self, include_head_node=False, alive_states_only=True):
+    def get_cluster_instances(self, include_head_node=False, alive_states_only=True, instance_ids=None):
         """
         Get instances that are associated with the cluster.
 
@@ -266,13 +266,16 @@ class InstanceManager:
         """
         ec2_client = boto3.client("ec2", region_name=self._region, config=self._boto3_config)
         paginator = ec2_client.get_paginator("describe_instances")
-        args = {
-            "Filters": [{"Name": "tag:parallelcluster:cluster-name", "Values": [self._cluster_name]}],
-        }
-        if alive_states_only:
-            args["Filters"].append({"Name": "instance-state-name", "Values": list(EC2_INSTANCE_ALIVE_STATES)})
-        if not include_head_node:
-            args["Filters"].append({"Name": "tag:parallelcluster:node-type", "Values": ["Compute"]})
+        if instance_ids:
+            args = {"InstanceIds": instance_ids}
+        else:
+            args = {
+                "Filters": [{"Name": "tag:parallelcluster:cluster-name", "Values": [self._cluster_name]}],
+            }
+            if alive_states_only:
+                args["Filters"].append({"Name": "instance-state-name", "Values": list(EC2_INSTANCE_ALIVE_STATES)})
+            if not include_head_node:
+                args["Filters"].append({"Name": "tag:parallelcluster:node-type", "Values": ["Compute"]})
         response_iterator = paginator.paginate(PaginationConfig={"PageSize": BOTO3_PAGINATION_PAGE_SIZE}, **args)
         filtered_iterator = response_iterator.search("Reservations[].Instances[]")
 
@@ -1076,6 +1079,7 @@ class InstanceManager:
                 slurm_nodes,
                 nodeaddrs=[instance.private_ip for instance in launched_instances],
                 nodehostnames=node_hostnames,
+                nodecomments=[instance.id for instance in launched_instances]
             )
             logger.info(
                 "Nodes are now configured with instances %s",

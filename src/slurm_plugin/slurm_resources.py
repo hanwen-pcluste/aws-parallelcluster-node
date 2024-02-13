@@ -210,6 +210,7 @@ class SlurmNode(metaclass=ABCMeta):
         state,
         partitions=None,
         reason=None,
+        comment=None,
         instance=None,
         slurmdstarttime: datetime = None,
         lastbusytime: datetime = None,
@@ -223,6 +224,7 @@ class SlurmNode(metaclass=ABCMeta):
         self.states = set(state.split("+"))
         self.partitions = partitions.strip().split(",") if partitions else None
         self.reason = reason
+        self.comment = comment
         self.instance = instance
         self.slurmdstarttime = slurmdstarttime
         self.lastbusytime = lastbusytime
@@ -459,6 +461,7 @@ class StaticNode(SlurmNode):
         state,
         partitions=None,
         reason=None,
+        comment=None,
         instance=None,
         slurmdstarttime=None,
         lastbusytime=None,
@@ -472,6 +475,7 @@ class StaticNode(SlurmNode):
             state,
             partitions,
             reason,
+            comment,
             instance,
             slurmdstarttime,
             lastbusytime=lastbusytime,
@@ -578,6 +582,7 @@ class DynamicNode(SlurmNode):
         state,
         partitions=None,
         reason=None,
+        comment=None,
         instance=None,
         slurmdstarttime=None,
         lastbusytime=None,
@@ -591,6 +596,7 @@ class DynamicNode(SlurmNode):
             state,
             partitions,
             reason,
+            comment,
             instance,
             slurmdstarttime,
             lastbusytime=lastbusytime,

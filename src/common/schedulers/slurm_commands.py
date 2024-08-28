@@ -355,6 +355,7 @@ def resume_powering_down_nodes():
     # TODO: This function was added due to Slurm ticket 12915. The bug is not reproducible and the ticket was then
     #  closed. This operation may now be useless: we need to check this.
     log.info("Resuming powering down nodes.")
+    log.info("new helllllllllllllllllll")
     powering_down_nodes = _get_slurm_nodes(states="powering_down")
     update_nodes(nodes=powering_down_nodes, state="resume", raise_on_error=False)
 
@@ -374,7 +375,7 @@ def _get_all_partition_nodes(partition_name, command_timeout=DEFAULT_GET_INFO_CO
 
 
 def _get_slurm_nodes(states=None, partition_name=None, command_timeout=DEFAULT_GET_INFO_COMMAND_TIMEOUT):
-    sinfo_command = f"{SINFO} -h -N -o %N"
+    sinfo_command = f"{SINFO} -h -o %N"
     partition_name = partition_name or ",".join(PartitionNodelistMapping.instance().get_partitions())
     validate_subprocess_argument(partition_name)
     sinfo_command += f" -p {partition_name}"
@@ -383,7 +384,11 @@ def _get_slurm_nodes(states=None, partition_name=None, command_timeout=DEFAULT_G
         sinfo_command += f" -t {states}"
     # Every node is print on a separate line
     # It's safe to use the function affected by B604 since the command is fully built in this code
-    return check_command_output(sinfo_command, timeout=command_timeout, shell=True).splitlines()  # nosec B604
+    sinfo_output = check_command_output(sinfo_command, timeout=command_timeout, shell=True).splitlines()
+    nodes=[]
+    for line in sinfo_output:
+        nodes.extend(check_command_output(f"{SCONTROL} show hostnames {line}", timeout=command_timeout, shell=True).splitlines())
+    return nodes  # nosec B604
 
 
 def _parse_nodes_info(slurm_node_info: str) -> List[SlurmNode]:

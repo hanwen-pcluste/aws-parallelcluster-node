@@ -649,7 +649,7 @@ class ClusterManager:
         time.sleep(5)
         log.info("Retrieving list of EC2 instances associated with the cluster")
         try:
-            return self._instance_manager.get_cluster_instances(include_head_node=False, alive_states_only=True)
+            return self._instance_manager.get_cluster_instances(include_head_node=False)
         except Exception as e:
             log.error("Failed when getting instance info from EC2 with exception %s", e)
             raise ClusterManager.EC2InstancesInfoUnavailable

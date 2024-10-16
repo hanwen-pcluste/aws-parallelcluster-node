@@ -193,11 +193,15 @@ class FleetManager(ABC):
             launch_params = self._evaluate_launch_params(count)
             assigned_nodes = self._launch_instances(launch_params)
             if len(assigned_nodes.get("Instances")) > 0:
+                instance_ids = [instance.get("InstanceId") for instance in assigned_nodes.get("Instances") if instance.get("InstanceId") ]
                 logger.info(
                     "Launched the following instances %s",
-                    print_with_count([instance.get("InstanceId", "") for instance in assigned_nodes.get("Instances")]),
+                    print_with_count(instance_ids),
                 )
                 logger.debug("Launched instances information: %s", assigned_nodes.get("Instances"))
+                running_nodes_file_path = "/etc/parallelcluster/slurm_plugin/running_nodes"
+                with open(running_nodes_file_path, "a") as f:
+                    f.write('\n'.join(instance_ids)+'\n')
 
         return [EC2Instance.from_describe_instance_data(instance_info) for instance_info in assigned_nodes["Instances"]]
 

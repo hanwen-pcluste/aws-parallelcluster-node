@@ -258,19 +258,24 @@ class InstanceManager:
         return list(instance_health_states.values())
 
     @log_exception(logger, "getting cluster instances from EC2", raise_on_error=True)
-    def get_cluster_instances(self, include_head_node=False, alive_states_only=True):
+    def get_cluster_instances(self, include_head_node=False):
         """
         Get instances that are associated with the cluster.
 
         Instances without all the info set are ignored and not returned
         """
+        running_instances_from_file = set()
+        running_instances_file_path = "/etc/parallelcluster/slurm_plugin/running_nodes"
+        with open(running_instances_file_path, "r") as f:
+            running_instances_from_file.update(set([line.strip() for line in f.readlines() if line.strip()]))
+        untracked_instances = running_instances_from_file.copy()
+
         ec2_client = boto3.client("ec2", region_name=self._region, config=self._boto3_config)
         paginator = ec2_client.get_paginator("describe_instances")
         args = {
             "Filters": [{"Name": "tag:parallelcluster:cluster-name", "Values": [self._cluster_name]}],
         }
-        if alive_states_only:
-            args["Filters"].append({"Name": "instance-state-name", "Values": list(EC2_INSTANCE_ALIVE_STATES)})
+        args["Filters"].append({"Name": "instance-state-name", "Values": list(EC2_INSTANCE_ALIVE_STATES)})
         if not include_head_node:
             args["Filters"].append({"Name": "tag:parallelcluster:node-type", "Values": ["Compute"]})
         response_iterator = paginator.paginate(PaginationConfig={"PageSize": BOTO3_PAGINATION_PAGE_SIZE}, **args)
@@ -278,26 +283,44 @@ class InstanceManager:
 
         instances = []
         for instance_info in filtered_iterator:
-            try:
-                private_ip, private_dns_name, all_private_ips = get_private_ip_address_and_dns_name(instance_info)
-                instances.append(
-                    EC2Instance(
-                        instance_info["InstanceId"],
-                        private_ip,
-                        private_dns_name.split(".")[0],
-                        all_private_ips,
-                        instance_info["LaunchTime"],
-                    )
-                )
-            except Exception as e:
-                logger.warning(
-                    "Ignoring instance %s because not all EC2 info are available, exception: %s, message: %s",
-                    instance_info["InstanceId"],
-                    type(e).__name__,
-                    e,
-                )
-
+            untracked_instances.discard(instance_info["InstanceId"])
+            self._create_ec2_instance_object(instance_info, instances)
+        non_existing_instances = untracked_instances.copy()
+        for instance_ids in self.chunks(list(untracked_instances),150):
+            filters=[{"Name": "instance-id", "Values": instance_ids}, {"Name": "instance-state-name", "Values": list(EC2_INSTANCE_ALIVE_STATES)}]
+            response_iterator = paginator.paginate(PaginationConfig={"PageSize": BOTO3_PAGINATION_PAGE_SIZE}, Filters=filters)
+            filtered_iterator = response_iterator.search("Reservations[].Instances[]")
+            for instance_info in filtered_iterator:
+                non_existing_instances.discard(instance_info["InstanceId"])
+                self._create_ec2_instance_object(instance_info, instances)
+        with open(running_instances_file_path, "w") as f:
+            f.write('\n'.join(list(running_instances_from_file - non_existing_instances))+'\n')
         return instances
+
+
+    def chunks(self, lst, n):
+        """Yield successive n-sized chunks from lst."""
+        for i in range(0, len(lst), n):
+            yield lst[i:i + n]
+    def _create_ec2_instance_object(self, instance_info, instances):
+        try:
+            private_ip, private_dns_name, all_private_ips = get_private_ip_address_and_dns_name(instance_info)
+            instances.append(
+                EC2Instance(
+                    instance_info["InstanceId"],
+                    private_ip,
+                    private_dns_name.split(".")[0],
+                    all_private_ips,
+                    instance_info["LaunchTime"],
+                )
+            )
+        except Exception as e:
+            logger.warning(
+                "Ignoring instance %s because not all EC2 info are available, exception: %s, message: %s",
+                instance_info["InstanceId"],
+                type(e).__name__,
+                e,
+            )
 
     def terminate_all_compute_nodes(self, terminate_batch_size):
         try:
